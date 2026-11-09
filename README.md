@@ -77,4 +77,6 @@ O projeto foi compilado em Debian 13 ARM64 com o SDK .NET 10.0.403. `dotnet buil
 
 O workflow Windows do GitHub Actions executa os testes, publica o `.exe` autocontido e faz um teste curto de inicialização do aplicativo. Baixe `NetStability-win-x64` na [página das execuções](https://github.com/LK-Code00/Internet-stability/actions), em **Artifacts**. O GitHub mantém cada artefato por 90 dias.
 
+A versão publicada para usuários fica na página de [Releases](https://github.com/LK-Code00/Internet-stability/releases). O `.exe` é um aplicativo portátil autocontido, não um instalador MSI: baixe-o e execute-o no Windows x64.
+
 O runner VSTest local do proot ARM64 não encontrou seu host .NET, mas a suíte passou no runner Windows. O teste curto confirma apenas que o processo do aplicativo inicia; a validação de rede real ainda deve ser feita no PC e no roteador do usuário, seguindo `docs/validation.md`.

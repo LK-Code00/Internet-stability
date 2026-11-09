@@ -5,6 +5,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: windows-latest
@@ -40,3 +43,21 @@ jobs:
           name: NetStability-win-x64
           path: .\artifacts\win-x64\NetStability.exe
           if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && github.event.head_commit.message == 'Release v1.0.0'
+    runs-on: windows-latest
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: NetStability-win-x64
+          path: .\release
+      - name: Publish GitHub release and attach executable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh release create v1.0.0 .\release\NetStability.exe --title "NetStability v1.0.0" --notes-file .\docs\release-notes-v1.0.0.md --target $env:GITHUB_SHA
