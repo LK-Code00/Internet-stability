@@ -4,7 +4,7 @@ Os testes unitários em `tests/NetStability.Core.Tests` validam cálculo de méd
 
 ## Verificação em Windows
 
-1. O build cruzado local em Debian 13 ARM64 com SDK .NET 10.0.403 concluiu sem erros/avisos e produziu o executável Windows x64 autocontido. A compilação da suíte de testes também concluiu; a execução do VSTest não funcionou no proot ARM64 por falha ao localizar o host `dotnet`. Confirme `dotnet test` e `dotnet build` no workflow Windows `Windows build` após cada push.
+1. O build cruzado local em Debian 13 ARM64 com SDK .NET 10.0.403 concluiu sem erros/avisos e produziu o executável Windows x64 autocontido. Em 9 de novembro de 2026, o workflow Windows `Windows build` passou: `dotnet test` e publicação do executável foram concluídos com sucesso. O runner VSTest do proot ARM64 local não conseguiu localizar o host .NET. O executável ainda precisa de validação interativa e medições em hardware Windows/rede real; este ambiente não consegue fazer essa validação.
 2. Em uma conexão cabeada estável, execute três diagnósticos sem carga. Confirme que o gateway fica baixo/estável e que média, min/máx e jitter refletem as oito amostras; a perda deve corresponder às sondas sem resposta.
 3. Em Wi-Fi, repita junto ao roteador e no local normal de jogo. Compare gateway, sinal/canal e BSSIDs vistos no canal. Depois repita via Ethernet. O sinal/canal ajudam a investigar, mas não medem RF diretamente.
 4. Configure um endereço de jogo que aceite ICMP. Deixe o monitor ativo durante uma partida e confirme a linha e métricas `Jogo`. Se o host bloquear ICMP, o app deve mostrar amostras ausentes e explicar que o resultado é inconclusivo.
