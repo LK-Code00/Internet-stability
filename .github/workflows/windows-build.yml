@@ -45,7 +45,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: github.event_name == 'push' && github.event.head_commit.message == 'Release v1.0.0'
+    if: github.event_name == 'push' && github.event.head_commit.message == 'Release v1.1.0'
     runs-on: windows-latest
     needs: build
     permissions:
@@ -60,4 +60,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
-        run: gh release create v1.0.0 .\release\NetStability.exe --title "NetStability v1.0.0" --notes-file .\docs\release-notes-v1.0.0.md --target $env:GITHUB_SHA
+        run: gh release create v1.1.0 .\release\NetStability.exe --title "NetStability v1.1.0" --notes-file .\docs\release-notes-v1.1.0.md --target $env:GITHUB_SHA

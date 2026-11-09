@@ -2,12 +2,32 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Security.Principal;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace NetStability.App.Services;
 
 public sealed class AdminChangeService
 {
+    private const string WifiSubgroup = "19cbb8fa-5279-450e-9fac-8a3d5fedd0c1";
+    private const string WifiPowerSetting = "12bbebe6-58d6-4636-95bb-3217ef867c1a";
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SystemPowerStatus
+    {
+        public byte AcLineStatus;
+        public byte BatteryFlag;
+        public byte BatteryLifePercent;
+        public byte SystemStatusFlag;
+        public uint BatteryLifeTime;
+        public uint BatteryFullLifeTime;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetSystemPowerStatus(out SystemPowerStatus status);
+
+    public static bool IsOnAcPower => GetSystemPowerStatus(out var status) && status.AcLineStatus == 1;
+
     public bool IsAdministrator()
     {
         try
@@ -39,6 +59,35 @@ $verify = (Get-NetTCPSetting -SettingName Internet -ErrorAction Stop | Select-Ob
 if ($verify -ne $desired) {{ throw ('A verificação após a alteração retornou ' + $verify) }}
 ";
         await RunElevatedAsync(script, cancellationToken);
+    }
+
+    public Task SetWifiPowerModeAsync(string schemeGuid, int expectedCurrent, int desired, CancellationToken cancellationToken = default, bool activatePlan = true)
+    {
+        if (!Guid.TryParse(schemeGuid, out var parsed) || expectedCurrent is < 0 or > 3 || desired is < 0 or > 3)
+            throw new InvalidOperationException("O plano ou nível de energia Wi-Fi não é válido.");
+        var scheme = parsed.ToString("D");
+        var script = $@"
+$ErrorActionPreference = 'Stop'
+$scheme = '{scheme}'
+$subgroup = '{WifiSubgroup}'
+$setting = '{WifiPowerSetting}'
+$activatePlan = {activatePlan.ToString().ToLowerInvariant()}
+$root = 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes'
+$active = [string](Get-ItemProperty -Path $root -Name ActivePowerScheme -ErrorAction Stop).ActivePowerScheme
+if ($activatePlan -and $active -ne $scheme) {{ throw 'O plano de energia ativo mudou desde o diagnóstico. Nenhuma alteração foi feita.' }}
+$key = Join-Path (Join-Path (Join-Path $root $scheme) $subgroup) $setting
+$current = [int](Get-ItemProperty -Path $key -Name ACSettingIndex -ErrorAction Stop).ACSettingIndex
+if ($current -ne {expectedCurrent}) {{ throw ('A economia de energia Wi-Fi mudou desde o diagnóstico. Valor atual: ' + $current) }}
+& powercfg.exe /setacvalueindex $scheme $subgroup $setting {desired} | Out-Null
+if ($LASTEXITCODE -ne 0) {{ throw 'O Windows não aceitou o perfil de energia Wi-Fi.' }}
+if ($activatePlan) {{
+  & powercfg.exe /setactive $scheme | Out-Null
+  if ($LASTEXITCODE -ne 0) {{ throw 'O Windows não conseguiu aplicar o plano de energia.' }}
+}}
+$verify = [int](Get-ItemProperty -Path $key -Name ACSettingIndex -ErrorAction Stop).ACSettingIndex
+if ($verify -ne {desired}) {{ throw ('A verificação retornou o nível ' + $verify) }}
+";
+        return RunElevatedAsync(script, cancellationToken);
     }
 
     public Task<string> ReadAdapterPowerManagementAsync(string adapterName, CancellationToken cancellationToken = default)

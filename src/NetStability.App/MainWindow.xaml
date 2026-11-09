@@ -2,8 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:charts="clr-namespace:NetStability.App.Controls"
-        Title="NetStability — Diagnóstico de conexão" Height="850" Width="1320"
-        MinHeight="720" MinWidth="1080" Background="{StaticResource WindowBackground}"
+        Title="NetStability — Estabilidade de rede" Height="900" Width="1420"
+        MinHeight="760" MinWidth="1160" Background="{StaticResource WindowBackground}"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <Style x:Key="Card" TargetType="Border">
@@ -39,14 +39,14 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="NETSTABILITY" Foreground="{StaticResource Accent}" FontSize="12" FontWeight="Bold" />
-                <TextBlock Text="Estabilidade da conexão, com evidências" FontSize="25" FontWeight="SemiBold" Margin="0,3,0,0" />
+                <TextBlock Text="Sua conexão, monitorada e ajustada" FontSize="25" FontWeight="SemiBold" Margin="0,3,0,0" />
                 <TextBlock x:Name="AdapterSummaryText" Text="Lendo adaptador e rota..." Foreground="{StaticResource SecondaryText}" Margin="0,5,0,0" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button x:Name="DiagnoseButton" Content="Executar diagnóstico" Click="DiagnoseButton_Click" />
-                <Button x:Name="MonitorButton" Content="Iniciar monitoramento" Style="{StaticResource SecondaryButton}" Click="MonitorButton_Click" />
-                <Button x:Name="OptimizeButton" Content="Otimizar com justificativa" Click="OptimizeButton_Click" />
-                <Button x:Name="RestoreButton" Content="Restaurar" Style="{StaticResource SecondaryButton}" Click="RestoreButton_Click" />
+                <Button x:Name="DiagnoseButton" Content="Diagnóstico" ToolTip="Faz uma análise inicial da conexão" Click="DiagnoseButton_Click" />
+                <Button x:Name="MonitorButton" Content="Monitorar" Style="{StaticResource SecondaryButton}" ToolTip="Acompanha a conexão sem alterar configurações" Click="MonitorButton_Click" />
+                <Button x:Name="AutoWifiButton" Content="Monitorar + otimizar Wi-Fi" ToolTip="Ajusta a economia de energia do Wi-Fi se o enlace local degradar" Click="AutoWifiButton_Click" />
+                <Button x:Name="RestoreButton" Content="Desfazer ajustes" Style="{StaticResource SecondaryButton}" Click="RestoreButton_Click" />
             </StackPanel>
         </Grid>
 
@@ -54,6 +54,15 @@
             <TabItem Header="Painel">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource WindowBackground}">
                     <StackPanel Margin="12,16,0,0">
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,14" BorderBrush="#315B6D" Background="#142838">
+                            <StackPanel>
+                                <DockPanel LastChildFill="True">
+                                    <TextBlock DockPanel.Dock="Right" Text="LOCAL • SEM TELEMETRIA" Foreground="{StaticResource SecondaryText}" FontSize="10" VerticalAlignment="Center" />
+                                    <TextBlock Text="AGENTE DE ESTABILIDADE" Foreground="{StaticResource Accent}" FontSize="11" FontWeight="Bold" />
+                                </DockPanel>
+                                <TextBlock x:Name="AutoOptimizationText" Text="Escolha ‘Monitorar + otimizar Wi-Fi’. O agente analisa o ping até o roteador neste PC e explica cada decisão. Nenhuma métrica é enviada para fora." TextWrapping="Wrap" Foreground="{StaticResource PrimaryText}" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </Border>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="1.1*" /><ColumnDefinition Width="1.1*" />
@@ -133,7 +142,7 @@
                         <Border Style="{StaticResource Card}" Margin="0,22,0,12"><StackPanel><TextBlock Text="Parâmetros técnicos detectados" FontSize="16" FontWeight="SemiBold" /><TextBlock x:Name="AdvancedDetailsText" Text="Executar diagnóstico para preencher." Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,10,0,0" /></StackPanel></Border>
                         <Button x:Name="PowerQueryButton" Content="Consultar energia do adaptador (UAC)" Width="300" HorizontalAlignment="Left" Click="PowerQueryButton_Click" />
                         <TextBlock x:Name="PowerQueryResultText" Text="A consulta administrativa é somente leitura e acontece após clicar." Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,8,0,18" />
-                        <Border Style="{StaticResource Card}" Margin="0,0,0,12"><StackPanel><TextBlock Text="Escopo da otimização automática" FontSize="16" FontWeight="SemiBold" /><TextBlock Text="O app só oferece restaurar o TCP receive-window autotuning para Normal quando encontra níveis conhecidos como restritos ou experimentais. Antes, guarda o valor atual em um backup local; ao restaurar, verifica se o valor ainda é o que o app aplicou. Essa opção pode ajudar throughput TCP e não promete reduzir ping. DNS, MTU, RSS, interrupções e economia de energia são apenas diagnosticados/recomendados quando aplicável; não recebem valores genéricos." Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,8,0,0" /></StackPanel></Border>
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,12"><StackPanel><TextBlock Text="Ajustes reversíveis" FontSize="16" FontWeight="SemiBold" /><TextBlock Text="O modo Wi-Fi automático observa o ping do gateway. Com perda ou jitter local persistente, sinal suficiente e o PC na tomada, pode definir o perfil Wi-Fi da tomada como Máximo desempenho. O valor original é salvo e pode ser restaurado acima. Não mexe no perfil de bateria nem nas opções do driver." Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,8,0,10" /><Button x:Name="OptimizeButton" Content="Ajustar TCP para transferências" Width="280" HorizontalAlignment="Left" Click="OptimizeButton_Click" /><TextBlock Text="Este ajuste separado só restaura o padrão TCP ‘Normal’ quando encontra um nível restrito. Pode beneficiar transferências; não é um ajuste de ping de jogos." Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,7,0,12" /></StackPanel></Border>
                         <TextBlock x:Name="StatusText" Text="Pronto." Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,5,0,0" />
                     </StackPanel>
                 </ScrollViewer>

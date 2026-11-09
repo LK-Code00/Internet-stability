@@ -25,10 +25,12 @@ public sealed record NetworkSnapshot(
     int? SameChannelNetworks,
     string RadioType,
     string DriverVersion,
-    string PowerManagement)
+    string PowerManagement,
+    string ActivePowerSchemeGuid,
+    int? WifiPowerModeAc)
 {
     public static NetworkSnapshot Empty { get; } = new("(não identificado)", "", "", "Desconhecido", "", 0,
-        "", 0, "Desconhecido", "", [], null, null, null, "", "", "Não disponível");
+        "", 0, "Desconhecido", "", [], null, null, null, "", "", "Não disponível", "", null);
 }
 
 public sealed class NetworkSnapshotService
@@ -56,6 +58,14 @@ if ($adapter) { try { $p = Get-NetAdapterPowerManagement -Name $adapter.Name -Er
 $driverVersion = ''; if ($adapter) { $d = Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue | Where-Object DeviceName -eq $adapter.InterfaceDescription | Select-Object -First 1; if ($d) { $driverVersion = [string]$d.DriverVersion } }
 $advanced = @(); if ($adapter) { $advanced = @(Get-NetAdapterAdvancedProperty -Name $adapter.Name -ErrorAction SilentlyContinue | Select-Object DisplayName,DisplayValue,RegistryKeyword,RegistryValue,ValidDisplayValues) }
 $advancedJson = ConvertTo-Json -InputObject $advanced -Compress -Depth 4
+$powerRoot = 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes'
+$powerScheme = ''; $wifiAc = $null
+try {
+  $powerScheme = [string](Get-ItemProperty -Path $powerRoot -Name ActivePowerScheme -ErrorAction Stop).ActivePowerScheme
+  $wifiSetting = Join-Path (Join-Path (Join-Path $powerRoot $powerScheme) '19cbb8fa-5279-450e-9fac-8a3d5fedd0c1') '12bbebe6-58d6-4636-95bb-3217ef867c1a'
+  $powerValue = Get-ItemProperty -Path $wifiSetting -Name ACSettingIndex -ErrorAction Stop
+  $wifiAc = [int]$powerValue.ACSettingIndex
+} catch {}
 $vpn = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' -and ($_.Name + ' ' + $_.InterfaceDescription) -match '(?i)VPN|WireGuard|Wintun|OpenVPN|TAP-Windows|TUN' } | ForEach-Object { $_.Name })
 $wifi = (& netsh.exe wlan show interfaces 2>$null | Out-String)
 $near = (& netsh.exe wlan show networks mode=bssid 2>$null | Out-String)
@@ -75,6 +85,8 @@ $near = (& netsh.exe wlan show networks mode=bssid 2>$null | Out-String)
  RadioType = ''
  DriverVersion = $driverVersion
  PowerManagement = $power
+ ActivePowerSchemeGuid = $powerScheme
+ WifiPowerModeAc = $wifiAc
 } | ConvertTo-Json -Compress -Depth 4
 ";
 
@@ -120,7 +132,9 @@ $near = (& netsh.exe wlan show networks mode=bssid 2>$null | Out-String)
                 sameChannel,
                 radio,
                 ReadString(root, "DriverVersion"),
-                ReadString(root, "PowerManagement"));
+                ReadString(root, "PowerManagement"),
+                ReadString(root, "ActivePowerSchemeGuid"),
+                ReadNullableInt(root, "WifiPowerModeAc"));
             return string.IsNullOrWhiteSpace(snapshot.Gateway) || snapshot.Gateway is "0.0.0.0" or "::"
                 ? await WithFallbackGateway(snapshot, cancellationToken)
                 : snapshot;
@@ -167,7 +181,7 @@ $near = (& netsh.exe wlan show networks mode=bssid 2>$null | Out-String)
                 var type = nic.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 ? "Wi-Fi" : "Ethernet / outro físico";
                 return Task.FromResult(new NetworkSnapshot(nic.Name, nic.Description, "", type, nic.Speed.ToString(),
                     ipProperties?.Index ?? 0, gateway.ToString(), ipProperties?.Mtu ?? 0, "Desconhecido", "",
-                    properties.DnsAddresses.Select(item => item.ToString()).ToArray(), null, null, null, "", "", "Não disponível"));
+                    properties.DnsAddresses.Select(item => item.ToString()).ToArray(), null, null, null, "", "", "Não disponível", "", null));
             }
             catch { }
         }
@@ -178,6 +192,8 @@ $near = (& netsh.exe wlan show networks mode=bssid 2>$null | Out-String)
         root.TryGetProperty(property, out var value) ? value.ToString() : "";
     private static int ReadInt(JsonElement root, string property) =>
         root.TryGetProperty(property, out var value) && value.TryGetInt32(out var result) ? result : 0;
+    private static int? ReadNullableInt(JsonElement root, string property) =>
+        root.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var result) ? result : null;
     private static string[] ReadArray(JsonElement root, string property) =>
         root.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Array
             ? value.EnumerateArray().Select(item => item.ToString()).Where(item => !string.IsNullOrWhiteSpace(item)).ToArray()

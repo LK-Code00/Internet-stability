@@ -49,6 +49,8 @@ public sealed record DiagnosticReport
     public int? WifiChannel { get; init; }
     public int? SameChannelNetworks { get; init; }
     public string TcpAutoTuningLevel { get; init; } = "Desconhecido";
+    public string ActivePowerSchemeGuid { get; init; } = "";
+    public int? WifiPowerModeAc { get; init; }
     public string VpnAdapters { get; init; } = "";
     public int Mtu { get; init; }
     public string[] DnsServers { get; init; } = [];

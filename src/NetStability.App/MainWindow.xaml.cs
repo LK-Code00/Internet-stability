@@ -30,6 +30,9 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _monitorCancellation;
     private DiagnosticReport? _latestReport;
     private bool _busy;
+    private bool _autoWifiOptimization;
+    private bool _autoOptimizationAttempted;
+    private int _degradedGatewaySamples;
 
     public MainWindow()
     {
@@ -40,7 +43,7 @@ public partial class MainWindow : Window
         ExternalTargetBox.Text = _settings.ExternalTarget;
         GameTargetBox.Text = _settings.GameTarget;
         foreach (var report in _store.LoadHistory().OrderByDescending(item => item.StartedAt)) _history.Add(report);
-        RestoreButton.IsEnabled = _store.HasBackupFile;
+        RestoreButton.IsEnabled = _store.HasBackupFile || _store.HasWifiBackupFile;
         Loaded += MainWindow_Loaded;
         Closed += (_, _) => StopMonitoring();
     }
@@ -129,6 +132,8 @@ public partial class MainWindow : Window
             WifiChannel = _snapshot.WifiChannel,
             SameChannelNetworks = _snapshot.SameChannelNetworks,
             TcpAutoTuningLevel = _snapshot.TcpAutoTuningLevel,
+            ActivePowerSchemeGuid = _snapshot.ActivePowerSchemeGuid,
+            WifiPowerModeAc = _snapshot.WifiPowerModeAc,
             VpnAdapters = _snapshot.VpnAdapters,
             Mtu = _snapshot.Mtu,
             DnsServers = _snapshot.DnsServers,
@@ -168,8 +173,23 @@ public partial class MainWindow : Window
 
     private async void MonitorButton_Click(object sender, RoutedEventArgs e)
     {
+        await ToggleMonitoringAsync(false);
+    }
+
+    private async void AutoWifiButton_Click(object sender, RoutedEventArgs e)
+    {
+        await ToggleMonitoringAsync(true);
+    }
+
+    private async Task ToggleMonitoringAsync(bool optimizeWifi)
+    {
         if (_monitorCancellation is not null)
         {
+            if (optimizeWifi != _autoWifiOptimization)
+            {
+                StatusText.Text = "Pare o modo de monitoramento atual antes de mudar o tipo de otimização.";
+                return;
+            }
             StopMonitoring();
             StatusText.Text = "Monitoramento parado.";
             return;
@@ -181,9 +201,18 @@ public partial class MainWindow : Window
             UpdateAdapterSummary();
             _samples.Clear();
             _displayGameTarget = string.IsNullOrWhiteSpace(_settings.GameTarget) ? null : _settings.GameTarget.Trim();
+            _autoWifiOptimization = optimizeWifi;
+            _autoOptimizationAttempted = false;
+            _degradedGatewaySamples = 0;
             _monitorCancellation = new CancellationTokenSource();
             MonitorButton.Content = "Parar monitoramento";
-            StatusText.Text = "Monitorando gateway, destino externo e servidor de jogo configurado.";
+            AutoWifiButton.Content = optimizeWifi ? "Parar otimização automática" : "Monitorar + otimizar Wi-Fi";
+            AutoOptimizationText.Text = optimizeWifi
+                ? "Modo ativo: observando o enlace até o roteador. Só ajustará a economia de energia se houver degradação local persistente, sinal adequado e alimentação na tomada."
+                : "Monitoramento ligado sem alterações automáticas.";
+            StatusText.Text = optimizeWifi
+                ? "Monitoramento e otimização automática do Wi-Fi ativos."
+                : "Monitorando a rede sem aplicar ajustes.";
             _ = MonitorLoopAsync(_monitorCancellation.Token);
         }
         catch (Exception exception)
@@ -197,6 +226,7 @@ public partial class MainWindow : Window
     {
         var traffic = new TrafficSampler();
         double? previousInternet = null;
+        var refreshCounter = 0;
         var external = _settings.ExternalTarget.Trim();
         var game = string.IsNullOrWhiteSpace(_settings.GameTarget) ? null : _settings.GameTarget.Trim();
         try
@@ -204,10 +234,41 @@ public partial class MainWindow : Window
             while (!cancellationToken.IsCancellationRequested)
             {
                 var sample = await _probeService.ProbeCycleAsync(_snapshot, external, game, traffic, cancellationToken);
+                refreshCounter++;
+                if (refreshCounter % 20 == 0)
+                {
+                    _snapshot = await _snapshotService.ReadAsync(cancellationToken);
+                    UpdateAdapterSummary();
+                    UpdateAdvancedDetails();
+                }
                 var preceding = _samples.TakeLast(12).ToArray();
                 _samples.Add(sample);
                 while (_samples.Count > SampleCapacity) _samples.RemoveAt(0);
                 UpdateDashboard(_samples);
+
+                if (_autoWifiOptimization)
+                {
+                    var localWindow = preceding.TakeLast(7).Append(sample).Select(item => item.GatewayMs).ToArray();
+                    var localMetrics = MetricSummary.From(localWindow);
+                    var trafficSpike = preceding.Length >= 3 && TrafficAboveRecentBaseline(sample, preceding);
+                    var localDegraded = localMetrics.Received >= 5 && !trafficSpike &&
+                                        (localMetrics.LossPercent >= 5 || localMetrics.JitterMs >= 10);
+                    _degradedGatewaySamples = localDegraded ? _degradedGatewaySamples + 1 : Math.Max(0, _degradedGatewaySamples - 2);
+
+                    var agentDecision = RealtimeOptimizationAgent.Decide(new WifiAgentObservation(
+                        _snapshot.ConnectionType == "Wi-Fi",
+                        _snapshot.WifiSignal,
+                        AdminChangeService.IsOnAcPower,
+                        localMetrics,
+                        trafficSpike,
+                        _degradedGatewaySamples >= 6,
+                        _snapshot.WifiPowerModeAc,
+                        _store.HasWifiBackupFile));
+                    if (agentDecision.ShouldApplyMaximumPerformance && !_autoOptimizationAttempted)
+                        await TryAutoOptimizeWifiAsync(localMetrics);
+                    else if (!_autoOptimizationAttempted)
+                        AutoOptimizationText.Text = agentDecision.Message;
+                }
 
                 if (sample.InternetMs is null)
                     SetAlert("O destino externo não respondeu a ICMP nesta amostra; confirme com outro serviço ou destino.");
@@ -232,7 +293,54 @@ public partial class MainWindow : Window
                 _monitorCancellation.Dispose();
                 _monitorCancellation = null;
                 MonitorButton.Content = "Iniciar monitoramento";
+                AutoWifiButton.Content = "Monitorar + otimizar Wi-Fi";
+                _autoWifiOptimization = false;
             }
+        }
+    }
+
+    private async Task TryAutoOptimizeWifiAsync(MetricSummary localMetrics)
+    {
+        _autoOptimizationAttempted = true;
+        if (string.IsNullOrWhiteSpace(_snapshot.ActivePowerSchemeGuid) || !_snapshot.WifiPowerModeAc.HasValue) return;
+        if (_store.HasWifiBackupFile)
+        {
+            AutoOptimizationText.Text = "Já existe um ajuste Wi-Fi deste app aguardando restauração. Mantenho-o ativo sem reaplicar.";
+            RestoreButton.IsEnabled = true;
+            return;
+        }
+
+        var backup = new WifiPowerBackup(_snapshot.ActivePowerSchemeGuid, _snapshot.WifiPowerModeAc.Value, 0, DateTimeOffset.Now);
+        try
+        {
+            _store.SaveWifiBackup(backup);
+            AutoOptimizationText.Text = $"Degradação local persistente: jitter {Fmt(localMetrics.JitterMs, " ms")}, perda {localMetrics.LossPercent:F1}%. O Windows solicitará permissão para priorizar a estabilidade do Wi-Fi na tomada.";
+            await _adminChangeService.SetWifiPowerModeAsync(backup.SchemeGuid, backup.OriginalAcValue, backup.AppliedAcValue);
+            RestoreButton.IsEnabled = true;
+            AutoOptimizationText.Text = $"Ajuste aplicado: Wi-Fi em Máximo desempenho na tomada. Continuo monitorando para comparar; restaure quando quiser.";
+            try
+            {
+                _snapshot = await _snapshotService.ReadAsync();
+                UpdateAdvancedDetails();
+                UpdateDashboard(_samples);
+            }
+            catch { }
+        }
+        catch (OperationCanceledException)
+        {
+            _store.DeleteWifiBackup();
+            AutoOptimizationText.Text = "A solicitação de administrador foi cancelada; não alterei o perfil Wi-Fi.";
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                var after = await _snapshotService.ReadAsync();
+                if (after.WifiPowerModeAc == backup.OriginalAcValue) _store.DeleteWifiBackup();
+                else RestoreButton.IsEnabled = true;
+            }
+            catch { RestoreButton.IsEnabled = true; }
+            AutoOptimizationText.Text = $"Não consegui aplicar o ajuste Wi-Fi: {exception.Message}";
         }
     }
 
@@ -298,18 +406,31 @@ public partial class MainWindow : Window
         SetBusy(true);
         try
         {
+            var wifiBackup = _store.LoadWifiBackup();
             var backup = _store.LoadBackup();
-            if (backup is null)
+            if (wifiBackup is null && backup is null)
             {
                 StatusText.Text = "Não há alterações deste app para restaurar.";
                 return;
             }
-            await _adminChangeService.SetTcpAutotuningAsync(backup.AppliedLevel, backup.OriginalLevel);
-            _store.DeleteBackup();
+            var restored = new List<string>();
+            if (wifiBackup is not null)
+            {
+                await _adminChangeService.SetWifiPowerModeAsync(wifiBackup.SchemeGuid, wifiBackup.AppliedAcValue, wifiBackup.OriginalAcValue, activatePlan: false);
+                _store.DeleteWifiBackup();
+                restored.Add("perfil de energia Wi-Fi");
+            }
+            if (backup is not null)
+            {
+                await _adminChangeService.SetTcpAutotuningAsync(backup.AppliedLevel, backup.OriginalLevel);
+                _store.DeleteBackup();
+                restored.Add("TCP autotuning");
+            }
             RestoreButton.IsEnabled = false;
-            StatusText.Text = $"TCP autotuning restaurado para {backup.OriginalLevel}.";
+            StatusText.Text = $"Restaurado: {string.Join(" e ", restored)}.";
             _snapshot = await _snapshotService.ReadAsync();
             UpdateAdvancedDetails();
+            AutoOptimizationText.Text = "Ajustes deste app restaurados ao valor anterior.";
         }
         catch (Exception exception) { StatusText.Text = $"Não foi possível restaurar: {exception.Message}"; }
         finally { SetBusy(false); }
@@ -417,7 +538,7 @@ public partial class MainWindow : Window
             : (System.Windows.Media.Brush)FindResource("Danger");
         QualityExplanationText.Text = score.Explanation;
         WifiStatusText.Text = _snapshot.ConnectionType == "Wi-Fi"
-            ? $"Wi-Fi • sinal Windows {_snapshot.WifiSignal?.ToString() ?? "—"}% • canal {_snapshot.WifiChannel?.ToString() ?? "—"} • BSSIDs no canal: {_snapshot.SameChannelNetworks?.ToString() ?? "—"}"
+            ? $"Wi-Fi • sinal {_snapshot.WifiSignal?.ToString() ?? "—"}% • canal {_snapshot.WifiChannel?.ToString() ?? "—"} • energia na tomada: {WifiPowerModeName(_snapshot.WifiPowerModeAc)} • redes no canal: {_snapshot.SameChannelNetworks?.ToString() ?? "—"}"
             : $"{_snapshot.ConnectionType} • link {_snapshot.LinkSpeed} • MTU IPv4 {_snapshot.Mtu}";
         DnsStatusText.Text = $"DNS da interface física: {string.Join(", ", _snapshot.DnsServers)}";
     }
@@ -434,6 +555,7 @@ public partial class MainWindow : Window
             $"Propriedades avançadas do driver (somente leitura; rótulos dependem do fabricante): {_snapshot.AdapterAdvancedSettings}\n" +
             $"Índice: {_snapshot.InterfaceIndex} • gateway local: {_snapshot.Gateway}\nMTU IPv4 informada pelo Windows: {_snapshot.Mtu} bytes (sem ajuste automático; valide PMTU antes de alterar)\n" +
             $"TCP receive-window autotuning: {_snapshot.TcpAutoTuningLevel}\nDNS da interface física: {string.Join(", ", _snapshot.DnsServers)}\n" +
+            $"Economia de energia Wi-Fi na tomada: {WifiPowerModeName(_snapshot.WifiPowerModeAc)}\n" +
             $"Wi-Fi: sinal {_snapshot.WifiSignal?.ToString() ?? "—"}% • canal {_snapshot.WifiChannel?.ToString() ?? "—"} • tipo de rádio {_snapshot.RadioType} • BSSIDs no mesmo canal {_snapshot.SameChannelNetworks?.ToString() ?? "—"}\n" +
             $"Driver: {_snapshot.DriverVersion}\nGerenciamento de energia (NetAdapter): {_snapshot.PowerManagement}\n" +
             $"Interfaces VPN/túnel suspeitas: {_snapshot.VpnAdapters}" +
@@ -479,12 +601,22 @@ public partial class MainWindow : Window
         _busy = busy;
         DiagnoseButton.IsEnabled = !busy;
         OptimizeButton.IsEnabled = !busy;
-        RestoreButton.IsEnabled = !busy && _store.HasBackupFile;
+        RestoreButton.IsEnabled = !busy && (_store.HasBackupFile || _store.HasWifiBackupFile);
         MonitorButton.IsEnabled = !busy;
+        AutoWifiButton.IsEnabled = !busy;
         PowerQueryButton.IsEnabled = !busy;
     }
 
     private static string Fmt(double? value, string suffix) => value.HasValue ? $"{value.Value:F1}{suffix}" : "—";
+
+    private static string WifiPowerModeName(int? value) => value switch
+    {
+        0 => "Máximo desempenho",
+        1 => "Economia baixa",
+        2 => "Economia média",
+        3 => "Economia máxima",
+        _ => "não exposta pelo Windows/driver"
+    };
 
     private static string Delta(double? before, double? after)
     {

@@ -5,6 +5,7 @@ using NetStability.Core.Models;
 namespace NetStability.App.Services;
 
 public sealed record OptimizationBackup(string OriginalLevel, string AppliedLevel, DateTimeOffset CreatedAt);
+public sealed record WifiPowerBackup(string SchemeGuid, int OriginalAcValue, int AppliedAcValue, DateTimeOffset CreatedAt);
 public sealed record AppSettings(string ExternalTarget, string GameTarget);
 
 public sealed class StateStore
@@ -13,8 +14,10 @@ public sealed class StateStore
     private readonly string _directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetStability");
     private string HistoryPath => Path.Combine(_directory, "history.json");
     private string BackupPath => Path.Combine(_directory, "optimization-backup.json");
+    private string WifiBackupPath => Path.Combine(_directory, "wifi-power-backup.json");
     private string SettingsPath => Path.Combine(_directory, "settings.json");
     public bool HasBackupFile => File.Exists(BackupPath);
+    public bool HasWifiBackupFile => File.Exists(WifiBackupPath);
 
     public IReadOnlyList<DiagnosticReport> LoadHistory()
     {
@@ -53,6 +56,27 @@ public sealed class StateStore
     public void DeleteBackup()
     {
         if (File.Exists(BackupPath)) File.Delete(BackupPath);
+    }
+
+    public WifiPowerBackup? LoadWifiBackup()
+    {
+        if (!File.Exists(WifiBackupPath)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<WifiPowerBackup>(File.ReadAllText(WifiBackupPath), _options)
+                   ?? throw new InvalidDataException("O backup de energia Wi-Fi está vazio.");
+        }
+        catch (Exception exception)
+        {
+            throw new InvalidDataException($"Não foi possível ler o backup de energia Wi-Fi em {WifiBackupPath}.", exception);
+        }
+    }
+
+    public void SaveWifiBackup(WifiPowerBackup backup) => WriteJson(WifiBackupPath, backup);
+
+    public void DeleteWifiBackup()
+    {
+        if (File.Exists(WifiBackupPath)) File.Delete(WifiBackupPath);
     }
 
     public AppSettings LoadSettings()

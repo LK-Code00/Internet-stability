@@ -71,4 +71,41 @@ public class MetricSummaryTests
     {
         Assert.Equal(expected, FindingAnalyzer.ShouldRestoreDefaultTcpAutotuning(level));
     }
+
+    [Fact]
+    public void WifiAgentActsOnlyAfterPersistentLocalDegradationWithSafeConditions()
+    {
+        var gateway = MetricSummary.From(new double?[] { 2, 20, 2, 20, 2, 20, 2, 20 });
+        var decision = RealtimeOptimizationAgent.Decide(new WifiAgentObservation(
+            true, 80, true, gateway, false, true, 2, false));
+
+        Assert.True(decision.ShouldApplyMaximumPerformance);
+        Assert.Contains("perda", decision.Message);
+    }
+
+    [Fact]
+    public void WifiAgentDoesNotChangeEnergyOnBatteryOrWeakSignal()
+    {
+        var gateway = MetricSummary.From(new double?[] { 2, 20, 2, 20, 2, 20, 2, 20 });
+        var battery = RealtimeOptimizationAgent.Decide(new WifiAgentObservation(
+            true, 80, false, gateway, false, true, 2, false));
+        var weakSignal = RealtimeOptimizationAgent.Decide(new WifiAgentObservation(
+            true, 45, true, gateway, false, true, 2, false));
+
+        Assert.False(battery.ShouldApplyMaximumPerformance);
+        Assert.Contains("bateria", battery.Message);
+        Assert.False(weakSignal.ShouldApplyMaximumPerformance);
+        Assert.Contains("sinal Wi-Fi", weakSignal.Message);
+    }
+
+    [Fact]
+    public void WifiAgentDoesNotTreatTrafficSpikeAsAdapterPowerProblem()
+    {
+        var gateway = MetricSummary.From(new double?[] { 2, 20, 2, 20, 2, 20, 2, 20 });
+        var decision = RealtimeOptimizationAgent.Decide(new WifiAgentObservation(
+            true, 80, true, gateway, true, true, 2, false));
+
+        Assert.False(decision.ShouldApplyMaximumPerformance);
+        Assert.Contains("pico de tráfego", decision.Message);
+    }
 }
