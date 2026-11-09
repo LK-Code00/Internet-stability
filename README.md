@@ -75,6 +75,6 @@ docs/validation.md              plano de validação em hardware Windows
 
 O projeto foi compilado em Debian 13 ARM64 com o SDK .NET 10.0.403. `dotnet build NetStability.sln -c Release --no-restore` terminou com zero erros e zero avisos; a publicação cruzada gerou `artifacts/win-x64/NetStability.exe` (cerca de 62 MiB). O binário é Windows x64 autocontido, mas este ambiente Termux/Android não executa aplicativos Windows.
 
-Em 9 de novembro de 2026, o workflow Windows do GitHub Actions passou: testes unitários e publicação do `.exe` autocontido concluídos. Baixe `NetStability-win-x64` na [execução de CI](https://github.com/LK-Code00/Internet-stability/actions/runs/42680673993), em **Artifacts**. O GitHub mantém esse artefato por 90 dias.
+O workflow Windows do GitHub Actions executa os testes, publica o `.exe` autocontido e faz um teste curto de inicialização do aplicativo. Baixe `NetStability-win-x64` na [página das execuções](https://github.com/LK-Code00/Internet-stability/actions), em **Artifacts**. O GitHub mantém cada artefato por 90 dias.
 
-O runner de testes local do proot ARM64 não encontrou seu host .NET, mas a suíte passou no runner Windows. O aplicativo não foi aberto em uma máquina Windows neste ambiente; a validação de rede real ainda deve ser feita no PC e no roteador do usuário, seguindo `docs/validation.md`.
+O runner VSTest local do proot ARM64 não encontrou seu host .NET, mas a suíte passou no runner Windows. O teste curto confirma apenas que o processo do aplicativo inicia; a validação de rede real ainda deve ser feita no PC e no roteador do usuário, seguindo `docs/validation.md`.
