@@ -1,0 +1,28 @@
+name: Windows build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Test core metrics
+        run: dotnet test .\tests\NetStability.Core.Tests\NetStability.Core.Tests.csproj -c Release
+      - name: Publish self-contained Windows x64 app
+        run: >-
+          dotnet publish .\src\NetStability.App\NetStability.App.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -o .\artifacts\win-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NetStability-win-x64
+          path: .\artifacts\win-x64\NetStability.exe
+          if-no-files-found: error
